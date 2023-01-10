@@ -1,6 +1,5 @@
 from torch.utils.data import Dataset
 from torchvision.io import read_image
-from torchvision.transforms import ToPILImage
 import gdown
 import pathlib
 import os
@@ -14,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 class MSCTD(Dataset):
 
-    BASE_DIR = pathlib.Path(__file__).parent.resolve()
+    BASE_DIR = pathlib.Path(__file__).parent.parent.resolve()
     git_url = 'git@github.com:XL2248/MSCTD.git'
     images_urls = {
         'test' : 'https://drive.google.com/uc?id=1sMoQvrFP85bv9Dhv7mlLVBDj-1Efi9p-',
@@ -128,13 +127,3 @@ class MSCTD(Dataset):
             labels = tuple(self.target_transform(label) for label in labels)
         
         return ({'images': images, 'texts': texts}, labels)
-
-        
-
-       
-            
-
-
-
-        
-
