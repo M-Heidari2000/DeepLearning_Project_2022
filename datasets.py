@@ -1,5 +1,6 @@
 from torch.utils.data import Dataset
-from torchvision import datasets
+from torchvision.io import read_image
+from torchvision.transforms import ToPILImage
 import gdown
 import pathlib
 import os
@@ -16,22 +17,56 @@ class MSCTD(Dataset):
     BASE_DIR = pathlib.Path(__file__).parent.resolve()
     git_url = 'git@github.com:XL2248/MSCTD.git'
     images_urls = {
-        # 'train': 'https://drive.google.com/uc?id=1GAZgPpTUBSfhne-Tp0GDkvSHuq6EMMbj',
-        # 'test' : 'https://drive.google.com/uc?id=1B9ZFmSTqfTMaqJ15nQDrRNLqBvo-B39W',
-        # 'dev' : 'https://drive.google.com/uc?id=12HM8uVNjFg-HRZ15ADue4oLGFAYQwvTA',
+        'test' : 'https://drive.google.com/uc?id=1sMoQvrFP85bv9Dhv7mlLVBDj-1Efi9p-',
+        'dev' : 'https://drive.google.com/uc?id=1VWZi-vmgagAfNsO052QhIOWQIWg174-Z',
         'train' : 'https://drive.google.com/uc?id=1fFyJ0O9ke3SAfkswUNVPm_BnG51F4lw4'
     }
+    path_dict = {
+        'train': 'train_ende',
+        'test': 'test',
+        'dev': 'dev'
+    }
 
-    def __init__(self, root='data', mode='train', download=True, transform=None, target_transform=None):
+    def __init__(self, root='data', mode='train', download=True, image_transform=None, text_transform=None, target_transform=None):
         cls = self.__class__
         self.root = pathlib.Path(cls.BASE_DIR / root / cls.__name__)
         self.root.mkdir(exist_ok=True, parents=True)
         self.mode = mode
-        self.transform = transform
+        self.image_transform = image_transform
+        self.text_transform = text_transform
         self.target_transform = target_transform
 
         if download:
             self.download_and_extract_data()
+        self.data = self.read_conversation()
+
+    def read_conversation(self):  
+        text_dir_path = str(self.root / self.mode / 'texts')
+        mode = self.mode
+
+        index_path = str(pathlib.Path(text_dir_path) / f'image_index_{mode}.txt')
+        texts_path = str(pathlib.Path(text_dir_path) / f'english_{mode}.txt')
+        sentiment_path = str(pathlib.Path(text_dir_path) / f'sentiment_{mode}.txt')
+        data = []
+        logging.basicConfig(level=logging.INFO)
+
+        logging.info('opening and reading files...')
+        with open(index_path) as index_file, open(texts_path) as texts_file, open(sentiment_path) as sentiment_file:
+            all_texts = tuple(texts_file)
+            all_sentiment = tuple(sentiment_file)
+
+            for indices in index_file:
+                indices = eval(indices.strip())
+                texts = [all_texts[idx].strip() for idx in indices]
+                sentiment = [all_sentiment[idx].strip() for idx in indices]
+
+                texts = tuple(texts)
+                sentiment = tuple(sentiment)
+                images = tuple(indices)
+                data.append(({'images': images, 'texts': texts}, sentiment))
+        logging.info('finished reading files...')
+        logging.info('done...')
+        return data
 
     def download_and_extract_data(self):
         cls = self.__class__
@@ -46,7 +81,7 @@ class MSCTD(Dataset):
             output = self.root / f'myzip.zip'
             gdown.download(url=cls.images_urls.get(self.mode), output=str(output))
             with zipfile.ZipFile(output, 'r') as zip_file:
-                zip_file.extractall(self.root / self.mode / subfolder)
+                zip_file.extractall(p)
         finally:
             os.remove(output)
 
@@ -72,15 +107,34 @@ class MSCTD(Dataset):
             shutil.rmtree(repo_dir)
 
     def __len__(self):
-        raise NotImplementedError
+        return len(self.data)
 
-    def __getitem__(self):
-        raise NotImplementedError
+    def __getitem__(self, index):
+        image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
+        image_text, labels = self.data[index]
+        indices = image_text['images']
+        texts = image_text['texts']
+        images = []
+
+        for index in indices:
+            path = image_dir_path / f'{index}.jpg'
+            images.append(read_image(str(path)))
+        
+        if self.image_transform is not None:
+            images = tuple(self.image_transform(image) for image in images)
+        if self.text_transform is not None:
+            texts = tuple(self.text_transform(text) for text in texts)
+        if self.target_transform is not None:
+            labels = tuple(self.target_transform(label) for label in labels)
+        
+        return ({'images': images, 'texts': texts}, labels)
+
+        
+
+       
+            
 
 
-if __name__ == '__main__':
-    dataset = MSCTD(
-        root='data',
-        mode='train',
-        download=True
-    )
+
+        
+
