@@ -1,7 +1,11 @@
 # Byte-compiled / optimized / DLL files
+wandb/
 __pycache__/
 *.py[cod]
 *$py.class
+**/*__pycache__/
+**/*.pyc
+**/*.ipynb_checkpoints/
 
 # C extensions
 *.so
@@ -127,9 +131,3 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-
-# dataset files
-data/
-Backup/
-
-test.ipynb
