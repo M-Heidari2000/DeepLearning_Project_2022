@@ -1,13 +1,18 @@
 from torch.utils.data import Dataset
-from torchvision.io import read_image
+from PIL import Image
+from facenet_pytorch import MTCNN
 import gdown
 import pathlib
+import torch
 import os
 import zipfile
 import git
 import logging
 import shutil
 import glob
+from matplotlib import pyplot as plt
+import traceback
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,8 +30,19 @@ class MSCTD(Dataset):
         'test': 'test',
         'dev': 'dev'
     }
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    # initialize MTCNN face detector
+    mtcnn = MTCNN(
+        device=device,
+        select_largest=False,
+        post_process=False,
+        margin=50,
+        keep_all=True
+    )
 
-    def __init__(self, root='data', mode='train', download=True, image_transform=None, text_transform=None, target_transform=None):
+    def __init__(self, root='data', mode='train', download=True, image_transform=None, text_transform=None, target_transform=None, cnn_mode=False):
         cls = self.__class__
         self.root = pathlib.Path(cls.BASE_DIR / root / cls.__name__)
         self.root.mkdir(exist_ok=True, parents=True)
@@ -34,10 +50,56 @@ class MSCTD(Dataset):
         self.image_transform = image_transform
         self.text_transform = text_transform
         self.target_transform = target_transform
+        self.cnn_mode = cnn_mode
 
         if download:
             self.download_and_extract_data()
-        self.data = self.read_conversation()
+            
+        if cnn_mode:
+            self.data = self.read_images()
+        else:
+            self.data = self.read_conversation()
+            
+    def extract_faces(self):
+        mode = self.mode
+        faces_dir_path = self.root / 'faces' / mode
+        text_dir_path = self.root / self.mode / 'texts'
+        image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
+        sentiment_path = text_dir_path / f'sentiment_{mode}.txt'
+        logging.basicConfig(level=logging.INFO)
+        logging.info('opening and reading files...')
+
+        for c in range(3):
+            if os.path.exists(faces_dir_path / str(c)):
+                shutil.rmtree(faces_dir_path / str(c))
+            os.makedirs(faces_dir_path / str(c), exist_ok=True)
+        
+        fname_index = {'0': 0, '1': 1, '2': 2}
+        print(sentiment_path)
+        
+        with open(sentiment_path) as sentiment_file:
+            for i, label in enumerate(sentiment_file):
+                label = label.strip()
+                path = image_dir_path / f'{i}.jpg'
+                img = Image.open(path)
+                faces = self.mtcnn(img)
+                if faces is None:
+                    continue
+                for face in faces:
+                    plt.imsave(faces_dir_path / label / f'img{fname_index[label]}.jpg', face.permute(1, 2, 0).numpy() / 255)
+                    fname_index[label] += 1
+                    
+        return faces_dir_path
+                                                                    
+    def read_images(self):
+        mode = self.mode
+        text_dir_path = str(self.root / mode / 'texts')
+        sentiment_path = str(pathlib.Path(text_dir_path) / f'sentiment_{mode}.txt')
+        logging.basicConfig(level=logging.INFO)
+        logging.info('opening and reading files...')
+        with open(sentiment_path) as sentiment_file:
+            data = tuple([int(line.strip()) for line in sentiment_file])
+        return data
 
     def read_conversation(self):  
         text_dir_path = str(self.root / self.mode / 'texts')
@@ -57,7 +119,7 @@ class MSCTD(Dataset):
             for indices in index_file:
                 indices = eval(indices.strip())
                 texts = [all_texts[idx].strip() for idx in indices]
-                sentiment = [all_sentiment[idx].strip() for idx in indices]
+                sentiment = [int(all_sentiment[idx].strip()) for idx in indices]
 
                 texts = tuple(texts)
                 sentiment = tuple(sentiment)
@@ -80,7 +142,10 @@ class MSCTD(Dataset):
             output = self.root / f'myzip.zip'
             gdown.download(url=cls.images_urls.get(self.mode), output=str(output))
             with zipfile.ZipFile(output, 'r') as zip_file:
-                zip_file.extractall(p)
+                zip_file.extractall()
+                
+        except:
+            traceback.print_exc()
         finally:
             os.remove(output)
 
@@ -101,7 +166,8 @@ class MSCTD(Dataset):
             os.makedirs(folder_path, exist_ok=True)
             for file_name in file_names:
                 shutil.copy2(file_name, folder_path / file_name.split('/')[-1])
-        
+        except:
+            traceback.print_exc()
         finally:
             shutil.rmtree(repo_dir)
 
@@ -109,21 +175,37 @@ class MSCTD(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
-        image_text, labels = self.data[index]
-        indices = image_text['images']
-        texts = image_text['texts']
-        images = []
-
-        for index in indices:
+        
+        if self.cnn_mode:
+            label = self.data[index]
+            image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
             path = image_dir_path / f'{index}.jpg'
-            images.append(read_image(str(path)))
+            image = Image.open(str(path))
+            
+            if self.image_transform is not None:
+                image = self.image_transform(image)
+            if self.target_transform is not None:
+                label = self.target_transform(label)
+            
+            return (image, label)
+         
+        else:
+            image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
+            image_text, labels = self.data[index]
+            indices = image_text['images']
+            texts = image_text['texts']
+            images = []
+
+            for index in indices:
+                path = image_dir_path / f'{index}.jpg'
+                images.append(Image.open(str(path)))
         
-        if self.image_transform is not None:
-            images = tuple(self.image_transform(image) for image in images)
-        if self.text_transform is not None:
-            texts = tuple(self.text_transform(text) for text in texts)
-        if self.target_transform is not None:
-            labels = tuple(self.target_transform(label) for label in labels)
+            if self.image_transform is not None:
+                images = tuple(self.image_transform(image) for image in images)
+            if self.text_transform is not None:
+                texts = tuple(self.text_transform(text) for text in texts)
+            if self.target_transform is not None:
+                labels = tuple(self.target_transform(label) for label in labels)
         
-        return ({'images': images, 'texts': texts}, labels)
+            return ({'images': images, 'texts': texts}, labels)
+    
