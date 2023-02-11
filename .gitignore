@@ -135,3 +135,6 @@ Backup/
 test.ipynb
 GloVe/
 Bert_model.ipynb
+phase2mlp.pt
+phase2rnn.pt
+phase2bert.pt
