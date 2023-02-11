@@ -133,3 +133,5 @@ data/
 Backup/
 
 test.ipynb
+GloVe/
+Bert_model.ipynb
