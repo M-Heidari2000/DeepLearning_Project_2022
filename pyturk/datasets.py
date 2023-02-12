@@ -42,7 +42,7 @@ class MSCTD(Dataset):
         keep_all=True
     )
 
-    def __init__(self, root='data', mode='train', download=True, image_transform=None, text_transform=None, target_transform=None, cnn_mode=False):
+    def __init__(self, root='data', mode='train', download=True, image_transform=None, text_transform=None, target_transform=None, conversation_mode=False):
         cls = self.__class__
         self.root = pathlib.Path(cls.BASE_DIR / root / cls.__name__)
         self.root.mkdir(exist_ok=True, parents=True)
@@ -50,16 +50,17 @@ class MSCTD(Dataset):
         self.image_transform = image_transform
         self.text_transform = text_transform
         self.target_transform = target_transform
-        self.cnn_mode = cnn_mode
+        self.conversation_mode = conversation_mode
 
         if download:
             self.download_and_extract_data()
             
-        if cnn_mode:
-            self.data = self.read_images()
-        else:
+        if conversation_mode:
             self.data = self.read_conversation()
+        else:
+            self.data = self.read_data()
             
+
     def extract_faces(self):
         mode = self.mode
         faces_dir_path = self.root / 'faces' / mode
@@ -91,14 +92,25 @@ class MSCTD(Dataset):
                     
         return faces_dir_path
                                                                     
-    def read_images(self):
+    def read_data(self):
         mode = self.mode
         text_dir_path = str(self.root / mode / 'texts')
+        
         sentiment_path = str(pathlib.Path(text_dir_path) / f'sentiment_{mode}.txt')
+        index_path = str(pathlib.Path(text_dir_path) / f'image_index_{mode}.txt')
+        texts_path = str(pathlib.Path(text_dir_path) / f'english_{mode}.txt')
         logging.basicConfig(level=logging.INFO)
         logging.info('opening and reading files...')
-        with open(sentiment_path) as sentiment_file:
-            data = tuple([int(line.strip()) for line in sentiment_file])
+        with open(sentiment_path) as sentiment_file, open(texts_path) as texts_file, open(index_path) as index_file:
+            labels = [int(line.strip()) for line in sentiment_file]
+            texts = [line.strip() for line in texts_file]
+            indexes = []
+            for indices in index_file:
+            	indices = eval(indices.strip())
+            	indexes.extend(indices)
+            	
+            data = tuple(zip(indexes, texts, labels))
+            
         return data
 
     def read_conversation(self):  
@@ -176,20 +188,8 @@ class MSCTD(Dataset):
 
     def __getitem__(self, index):
         
-        if self.cnn_mode:
-            label = self.data[index]
-            image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
-            path = image_dir_path / f'{index}.jpg'
-            image = Image.open(str(path))
-            
-            if self.image_transform is not None:
-                image = self.image_transform(image)
-            if self.target_transform is not None:
-                label = self.target_transform(label)
-            
-            return (image, label)
-         
-        else:
+        if self.conversation_mode:
+
             image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
             image_text, labels = self.data[index]
             indices = image_text['images']
@@ -208,4 +208,48 @@ class MSCTD(Dataset):
                 labels = tuple(self.target_transform(label) for label in labels)
         
             return ({'images': images, 'texts': texts}, labels)
+                 
+        else:
+        
+            img_index, text, label = self.data[index]
+            image_dir_path = self.root / self.mode / 'images' / self.path_dict[self.mode]
+            path = image_dir_path / f'{img_index}.jpg'
+            image = Image.open(str(path))
+            
+            if self.image_transform is not None:
+                image = self.image_transform(image)
+            if self.text_transform is not None:
+            	text = self.text_transform(text)
+            if self.target_transform is not None:
+                label = self.target_transform(label)
+            
+            return (image, text, label)
+            
+            
+class OpenViDial(Dataset):
     
+    def __init__(self, data_path, text_transform=None, image_transform=None):
+        self.data_path = data_path
+        self.text_transform = text_transform
+        self.image_transform = image_transform
+        self.texts_path = self.data_path / 'texts.txt'
+        self.images_path = self.data_path / 'images'
+        
+        # Read texts file
+        with open(self.texts_path, 'r') as f:
+            self.texts = [line.strip() for line in f]
+        
+    def __len__(self):
+        return len(self.texts)
+    
+    def __getitem__(self, index):
+        text = self.texts[index]
+        image_path = self.images_path / f'{index}.jpg'
+        image = Image.open(str(image_path))
+        
+        if self.text_transform is not None:
+            text = self.text_transform(text)
+        if self.image_transform is not None:
+            image = self.image_transform(image)
+            
+        return text, image
